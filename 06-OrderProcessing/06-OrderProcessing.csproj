@@ -10,7 +10,6 @@
 
   <ItemGroup>
     <Folder Include="Phase1\" />
-    <Folder Include="Shared\Logging\" />
   </ItemGroup>
 
 </Project>
