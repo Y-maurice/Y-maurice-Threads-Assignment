@@ -1,15 +1,11 @@
-﻿using _06_OrderProcessing.Shared.Logging;
-using _06_OrderProcessing.Shared.Storage;
+﻿using _06_OrderProcessing.Phase1;
 
 public static class Program
 {
     public static async Task Main(string[] args)
     {
-        await DataSeeder.ResetAsync(CancellationToken.None);
+        await Phase1Runner.RunAsync(CancellationToken.None);
 
-        Log.Info("CustomerRepository -> Opening connection...");
-        Log.Success("CustomerRepository -> Customer #3 found (Omar Hassan)");
-        Log.Error("PaymentGateway -> Card declined");
 
     }
 }
