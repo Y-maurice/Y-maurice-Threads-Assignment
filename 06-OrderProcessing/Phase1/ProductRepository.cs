@@ -65,4 +65,67 @@ public class ProductRepository
 
         return reserved;
     }
+
+
+
+    // unsafe on purpose, for the race demo: read, wait, then write, with no protection
+    // around the whole sequence
+    public async Task<bool> ReserveStockUnsafeAsync(int productId, int qty, CancellationToken ct)
+    {
+        // 1. Read the stock now. After this the file lock is released.
+        List<Product> products = await _store.ReadAllAsync<Product>(DataFiles.Products, ct);
+        Product? product = products.FirstOrDefault(p => p.Id == productId);
+
+        if (product is null || product.StockQuantity < qty)
+            return false;
+
+        // 2. DB write steps: open connection 200 -> begin transaction 100 -> update 400
+        Log.Info("ProductRepository (UNSAFE) -> Opening connection...");
+        await Task.Delay(200, ct);
+
+        Log.Info("ProductRepository (UNSAFE) -> Beginning transaction...");
+        await Task.Delay(100, ct);
+
+        Log.Info($"ProductRepository (UNSAFE) -> Updating stock of Product #{productId} (-{qty})...");
+        await Task.Delay(400, ct);
+
+        // 3. Write back a value calculated from the oldd read
+        product.StockQuantity -= qty;
+        await _store.WriteAllAsync(DataFiles.Products, products, ct);
+
+        Log.Info("ProductRepository (UNSAFE) -> Committing...");
+        await Task.Delay(200, ct);
+
+        Log.Success($"ProductRepository (UNSAFE) -> Reserved {qty} of Product #{productId}");
+        return true;
+    }
+
+    public async Task ReleaseStockAsync(int productId, int qty, CancellationToken ct)
+    {
+        // DB write: open connection 200 -> begin transaction 100 -> update 400 -> commit 200
+        Log.Info("ProductRepository -> Opening connection...");
+        await Task.Delay(200, ct);
+
+        Log.Info("ProductRepository -> Beginning transaction...");
+        await Task.Delay(100, ct);
+
+        Log.Info($"ProductRepository -> Releasing {qty} of Product #{productId}...");
+        await Task.Delay(400, ct);
+
+        // Atomic read-change-write, same as ReserveStockAsync
+        await _store.UpdateAsync<Product, bool>(DataFiles.Products, products =>
+        {
+            Product? product = products.FirstOrDefault(p => p.Id == productId);
+            if (product is null)
+                return false;
+
+            product.StockQuantity += qty;
+            return true;
+        }, ct);
+
+        Log.Info("ProductRepository -> Committing...");
+        await Task.Delay(200, ct);
+
+        Log.Success($"ProductRepository -> Released {qty} of Product #{productId}");
+    }
 }

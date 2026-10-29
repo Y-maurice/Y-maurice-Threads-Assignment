@@ -1,0 +1,12 @@
+{
+  "totalOrders": 20,
+  "totalRevenue": 5966.45,
+  "completedCount": 13,
+  "rejectedCount": 6,
+  "failedCount": 1,
+  "paymentFailedCount": 0,
+  "topSellingProduct": "USB-C Hub",
+  "topSellingQuantity": 5,
+  "averageOrderValue": 458.96,
+  "generatedAt": "2026-10-29T11:29:31.398684+03:00"
+}

@@ -1,0 +1,8 @@
+SwiftBite Invoice
+Order:     11
+Customer:  1
+SubTotal:  90.00
+Discount:  9.00
+Shipping:  8.30
+Total:     89.30
+Checksum:  353136747
