@@ -37,4 +37,19 @@ public class InventoryService
         foreach (OrderItem item in order.Items)
             await _products.ReleaseStockAsync(item.ProductId, item.Quantity, ct);
     }
+
+
+    // Name of the first product that does not have enough stock (used for the Rejected reason)
+
+    public async Task<string?> FindShortageNameAsync(Order order, CancellationToken ct)
+    {
+        foreach (OrderItem item in order.Items)
+        {
+            Product? product = await _products.GetByIdAsync(item.ProductId, ct);
+            if (product is not null && product.StockQuantity < item.Quantity)
+                return product.Name;
+        }
+
+        return null;
+    }
 }
