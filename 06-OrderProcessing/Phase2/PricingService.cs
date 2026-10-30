@@ -70,6 +70,15 @@ public class PricingService
             ? null
             : await _coupons.GetByCodeAsync(order.CouponCode, ct);
 
+        if (order.CouponCode is not null)
+        {
+            if (coupon is null)
+                throw new InvalidCouponException($"Coupon '{order.CouponCode}' does not exist");
+
+            if (coupon.ExpiryDate < DateTime.Today)
+                throw new InvalidCouponException($"Coupon '{order.CouponCode}' has expired");
+        }
+
         int loyaltyPercent = customer.LoyaltyTier switch
         {
             LoyaltyTier.Silver => 5,
@@ -116,6 +125,23 @@ public class PricingService
         Log.Success($"PricingService -> Order #{order.Id} ShippingCost = {shipping:F2}");
         return shipping;
     }
+
+
+    // 1 query + 2 concurrent APIs. Fills every money field of the order.
+    public async Task<decimal> CalculateTotalAsync(Order order, CancellationToken ct)
+    {
+        order.SubTotal = await CalculateSubTotalAsync(order, ct);
+
+        Task<decimal> discountTask = GetDiscountAsync(order, ct);
+        Task<decimal> shippingTask = CalculateShippingCostAsync(order, ct);
+
+        order.Discount = await discountTask;
+        order.ShippingCost = await shippingTask;
+        order.TotalAmount = Round(order.SubTotal - order.Discount + order.ShippingCost);
+
+        return order.TotalAmount;
+    }
+
 
     public static decimal Round(decimal value) =>
         Math.Round(value, 2, MidpointRounding.AwayFromZero);
