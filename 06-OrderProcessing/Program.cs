@@ -9,5 +9,7 @@ public static class Program
         //await Phase2Runner.RunAsync(CancellationToken.None);
 
         await Phase3Runner.RunAsync(CancellationToken.None);
+
+        //await FireAndForgetRunner.RunExitDemoAsync(CancellationToken.None);
     }
 }

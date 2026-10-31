@@ -10,22 +10,15 @@ public static class Phase3Runner
 {
     public static async Task RunAsync(CancellationToken ct)
     {
+        // Sync vs async comparison first 
+        await SyncVsAsyncComparison.RunAsync(ct);
+
+        await FireAndForgetRunner.RunAsync(ct);
+
         await DataSeeder.ResetAsync(ct);
 
         var store = new JsonFileStore();
-        var customerRepo = new CustomerRepository(store);
-        var productRepo = new ProductRepository(store);
-        var couponRepo = new CouponRepository(store);
-
-        // Failures are injected from here, so no class checks order ids itself (9.2).
-        var orderRepo = new OrderRepository(store, new[] { 13 });
-        var processor = new OrderProcessor(
-            new CustomerService(customerRepo),
-            new InventoryService(productRepo),
-            new PricingService(store, customerRepo, couponRepo, Array.Empty<int>()),
-            new PaymentGateway(store, timeoutOrderIds: new[] { 5 }, declineOrderIds: new[] { 8 }),
-            orderRepo,
-            new EmailService(store, new Dictionary<int, int> { [3] = 2, [17] = int.MaxValue }));
+        OrderProcessor processor = BuildProcessor(store, withFailures: true);
 
         List<Order> orders = await new IncomingOrderRepository(store).GetAllAsync(ct);
 
@@ -39,7 +32,7 @@ public static class Phase3Runner
             await task;
         watch.Stop();
 
-        // Final table, printed with a single call so no log line can cut it.
+        // Final table printed with a single call so no log line can cut it
         IEnumerable<string> rows = orders.OrderBy(o => o.Id).Select(o =>
             $"{o.Id,5}  {o.Status,-13}  {o.TotalAmount,9:F2}  {o.FailureReason}");
 
@@ -54,5 +47,28 @@ public static class Phase3Runner
         Console.WriteLine($"orders.json now contains {saved.Count} records.");
         foreach (var group in saved.GroupBy(o => o.Status).OrderBy(g => g.Key))
             Console.WriteLine($"  {group.Key}: {group.Count()}");
+    }
+
+    // withFailures: false switches off every injected failure (used by the comparison)
+    public static OrderProcessor BuildProcessor(JsonFileStore store, bool withFailures)
+    {
+        var customerRepo = new CustomerRepository(store);
+        var productRepo = new ProductRepository(store);
+        var couponRepo = new CouponRepository(store);
+
+        int[] none = Array.Empty<int>();
+        var orderRepo = new OrderRepository(store, withFailures ? new[] { 13 } : none);
+
+        return new OrderProcessor(
+            new CustomerService(customerRepo),
+            new InventoryService(productRepo),
+            new PricingService(store, customerRepo, couponRepo, none),
+            new PaymentGateway(store,
+                timeoutOrderIds: withFailures ? new[] { 5 } : none,
+                declineOrderIds: withFailures ? new[] { 8 } : none),
+            orderRepo,
+            new EmailService(store, withFailures
+                ? new Dictionary<int, int> { [3] = 2, [17] = int.MaxValue }
+                : new Dictionary<int, int>()));
     }
 }
