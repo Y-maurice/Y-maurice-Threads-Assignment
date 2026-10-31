@@ -56,7 +56,15 @@ public class ProductRepository
         }, ct);
 
         Log.Info("ProductRepository -> Committing...");
-        await Task.Delay(200, ct);
+        try
+        {
+            await Task.Delay(200, ct);
+        }
+        catch (OperationCanceledException)
+        {
+            // The stock is already written to products.json. Return the real result
+            // so the caller can undo it: the cancellation is met at its next step.
+        }
 
         if (reserved)
             Log.Success($"ProductRepository -> Reserved {qty} of Product #{productId}");

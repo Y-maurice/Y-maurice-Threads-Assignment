@@ -5,30 +5,37 @@ namespace _06_OrderProcessing.Phase3;
 
 public class InventoryService
 {
+    private static readonly TimeSpan CleanupLimit = TimeSpan.FromSeconds(30);
+
     private readonly ProductRepository _products;
 
     public InventoryService(ProductRepository products) => _products = products;
 
-    // All items or nothing: if one item fails, the ones already reserved are put back.
+    // All items or nothing: if one item fails or the run is cancelled, the ones already reserved are put back.
     public async Task<bool> ReserveStockAsync(Order order, CancellationToken ct)
     {
         var reserved = new List<OrderItem>();
 
-        foreach (OrderItem item in order.Items)
+        try
         {
-            bool ok = await _products.ReserveStockAsync(item.ProductId, item.Quantity, ct);
-
-            if (!ok)
+            foreach (OrderItem item in order.Items)
             {
-                foreach (OrderItem done in reserved)
-                    await _products.ReleaseStockAsync(done.ProductId, done.Quantity, ct);
-                return false;
+                if (!await _products.ReserveStockAsync(item.ProductId, item.Quantity, ct))
+                {
+                    await PutBackAsync(reserved);
+                    return false;
+                }
+
+                reserved.Add(item);
             }
 
-            reserved.Add(item);
+            return true;
         }
-
-        return true;
+        catch (OperationCanceledException)
+        {
+            await PutBackAsync(reserved);
+            throw;
+        }
     }
 
     // Adds every item's quantity back.
@@ -38,9 +45,7 @@ public class InventoryService
             await _products.ReleaseStockAsync(item.ProductId, item.Quantity, ct);
     }
 
-
-    // Name of the first product that does not have enough stock (used for the Rejected reason)
-
+    // Name of the first product that does not have enough stock (used for the Rejected reason).
     public async Task<string?> FindShortageNameAsync(Order order, CancellationToken ct)
     {
         foreach (OrderItem item in order.Items)
@@ -51,5 +56,15 @@ public class InventoryService
         }
 
         return null;
+    }
+
+    // Undo work with its own token: the run's token may already be cancelled.
+    private async Task PutBackAsync(List<OrderItem> items)
+    {
+        using var cleanup = new CancellationTokenSource(CleanupLimit);
+        foreach (OrderItem item in items)
+            await _products.ReleaseStockAsync(item.ProductId, item.Quantity, cleanup.Token);
+
+        items.Clear();
     }
 }
