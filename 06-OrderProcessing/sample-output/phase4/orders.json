@@ -1,0 +1,27 @@
+[
+  {
+    "id": 1,
+    "customerId": 1,
+    "items": [
+      {
+        "productId": 1,
+        "quantity": 1,
+        "unitPrice": 0
+      },
+      {
+        "productId": 3,
+        "quantity": 1,
+        "unitPrice": 0
+      }
+    ],
+    "couponCode": "SAVE10",
+    "subTotal": 0,
+    "discount": 0,
+    "shippingCost": 0,
+    "totalAmount": 0,
+    "status": "Pending",
+    "createdAt": "2026-10-31T23:20:35.2731068+02:00",
+    "failureReason": null,
+    "transactionId": null
+  }
+]

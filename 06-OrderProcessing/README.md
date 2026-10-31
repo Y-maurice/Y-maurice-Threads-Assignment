@@ -369,3 +369,231 @@ await it anyway. It should catch its own exceptions inside.
 | Phase 3 sync, 10 `Thread`s, orders #1 to #10 | 12.5 s | 10 | 4 -> 4 |
 | Phase 3 async, 10 tasks, orders #1 to #10 | 10.2 s | 6 | 4 -> 7 |
 | Phase 3 async, all 20 orders with failures | 13.4 s | not measured | not measured |
+
+
+
+## Phase 4: Scale-up
+
+From Phase 4 on, the "start the tasks, then await them one by one" rule no longer
+applies. Each task has a requirement that rule cannot meet, so each one uses a different tool.
+
+| Task | Tool I used | Why "start, then await one by one" is not enough |
+|---|---|---|
+| 10.1 Live checkout progress | `Task.WhenEach` | Lines must appear in finishing order, not start order |
+| 10.2 Customer dashboard | `Task.WhenAll`, one `await` | One `await` for all loads, and every failure must be reported |
+| 10.3 Fastest shipping quote | `Task.WhenAny` in a loop + a linked `CancellationTokenSource` | The first successful quote wins and the losers are cancelled |
+| 10.4 A Fraud scoring (CPU-bound) | `Parallel.ForEach` with `MaxDegreeOfParallelism = Environment.ProcessorCount` | CPU work needs several threads running at the same instant |
+| 10.4 B Email re-send (I/O-bound) | `Parallel.ForEachAsync` with `MaxDegreeOfParallelism = 4` | At most 4 sends at the same time, enforced by the library |
+
+### Results of my run
+
+**10.1 Live checkout progress.** All 20 orders were started at once. A line was printed
+the moment each order finished, in finishing order: `[ 1/20] Order #4 -> Rejected
+(Customer is inactive) after 1.5 s` came first and `[20/20] Order #17 -> Completed after
+13.4 s` came last. Orders #5, #6 and #16 all finished at 9.3 s. After the last line the
+counts were Rejected 6, PaymentFailed 2, Completed 11, Failed 1, which matches Task 9.4.
+
+**10.2 Customer dashboard.** The four loads (profile, orders, payments, emails) started
+together and were awaited with a single `await`.
+
+- Customer #3: `Omar Hassan — 2 orders (#3 Completed, #13 Failed), 2 payments (#13 Refunded,
+  #3 Captured), 1 emails (#3)`, loaded in 0.8 s.
+- Customer #99 (payments load set to fail): `2 failures after 0.8 s`: `Payments store
+  timeout` and `Customer #99 not found`.
+
+Each load alone takes 0.5 to 0.8 s (200 ms plus 300 to 600 ms), so awaiting them one after
+another would take about 2 to 3 s. The 0.8 s I measured is close to the slowest single load.
+
+**10.3 Fastest shipping quote.** Budget 1.2 s, flat rate 25.00 when no quote arrives in time.
+
+| Order | Result | Time | Carriers cancelled |
+|---|---|---|---|
+| #1 | Flat rate 25.00 | 1214 ms | all three (budget over) |
+| #2 | FastShip 7.30 | 908 ms | NileCourier (CairoExpress failed: even order id) |
+| #3 | NileCourier 11.77 | 1091 ms | FastShip, CairoExpress |
+| #4 | FastShip 7.10 | 970 ms | NileCourier (CairoExpress failed: even order id) |
+| #5 | Flat rate 25.00 | 1213 ms | all three (budget over) |
+
+The Flat-rate results happen when every carrier's random wait is long: a carrier needs
+150 ms for the handshake plus its own random time, so a slow draw passes 1.2 s. No order
+took longer than about 1.2 s. Separate runs:
+
+- Order #6 with every carrier configured to fail: `All carriers failed`
+  (`ShippingProviderUnavailableException`).
+- Order #1 with a 300 ms budget: `Flat rate, price 25.00` after 301 ms.
+- Order #1 with the caller's token cancelled after 200 ms: every carrier logged
+  `[Carrier] cancelled`.
+
+**10.4 A Fraud scoring (CPU-bound).** 10,000 orders scored.
+
+- Flagged: 1005 (first five: 4, 8, 12, 29, 33). The sequential and the parallel run
+  returned the same ids.
+- Sequential: 12.53 s. Parallel: 2.04 s (speed-up x6.1) with `Environment.ProcessorCount` = 8.
+- The parallel run used 9 distinct threads over its whole length. This is not a contradiction
+  with the limit: `MaxDegreeOfParallelism = Environment.ProcessorCount` limits how many
+  iterations run at the same time to 8, but over the run the thread pool can use a different
+  thread for a later piece of work. (I checked the meaning of this option in the
+  `ParallelOptions.MaxDegreeOfParallelism` documentation on Microsoft Learn.)
+
+**10.4 B Email re-send (I/O-bound).** 30 emails (orders 1001 to 1030), no injected failures.
+
+- Highest number of sends running at the same time: exactly 4 (measured by a counter that only
+  observes, it does not limit).
+- `emails.json` (in the `Data-resend` folder) contains 30 records for 30 distinct orders.
+- Total time 8.2 s. Each send takes about 1 s (200 + 300 + 500 ms), and 30 sends in groups
+  of 4 is about 8 rounds, so about 8 s.
+
+### Performance table rows (Phase 4)
+
+| Measurement | Time | Distinct threads that logged | ThreadPool.ThreadCount |
+|---|---|---|---|
+| 10.1 All 20 orders, live progress | 13.4 s | not measured | not measured |
+| 10.2 Customer dashboard #3, 4 loads at once | 0.8 s | not measured | not measured |
+| 10.3 Fastest shipping quote, orders #1 to #5 | 908 to 1214 ms each (budget 1.2 s) | not measured | not measured |
+| 10.4 A Fraud scoring, sequential | 12.53 s | 1 | not measured |
+| 10.4 A Fraud scoring, parallel | 2.04 s (speed-up x6.1) | 9 (8 cores) | not measured |
+| 10.4 B Email re-send, 30 emails, max 4 at once | 8.2 s | not measured | not measured |
+
+### Answers to the Phase 4 questions
+
+**1. For each of Tasks 10.1 to 10.4: which tool did you use, and why can't "start, then await one by one" meet the requirement?**
+
+- **10.1:** `Task.WhenEach`. Awaiting the tasks in the order they were started prints
+  the lines in start order, and one slow order (for example #17 with its email
+  retries, 13.4 s, or #5 with its 3-second timeout) would hold back the lines of every
+  order after it, even if they finished long ago. `Task.WhenEach` hands out each task the
+  moment it completes, so in my run the lines came out as #4 (1.5 s), #15, #9, #11, ...
+  #17 (13.4 s). It also does not need a list that I search or rebuild after every
+  completion (requirement R4).
+- **10.2:** `Task.WhenAll` with a single `await`. The four loads start together and
+  the total time is close to the slowest load (0.8 s), not the sum. Awaiting them one by one
+  would stop at the first failed load, and the others would never be looked at, but
+  R4 asks for every failure.
+- **10.3:** `Task.WhenAny` in a loop. Awaiting the carriers in list order would wait for
+  the first carrier even when another one answered much sooner, and a failing carrier
+  would throw before a working one was even looked at. `WhenAny` tells me which carrier
+  finishes first, so I can take the first successful quote and keep waiting if the
+  finished one failed (for order #2, CairoExpress failed and FastShip's quote won).
+- **10.4 A:** `Parallel.ForEach`. The work is CPU-bound: a thread that is running the
+  loop is busy, so awaiting does not make it faster. Only several threads running at
+  the same instant, on different cores, shorten the time (12.53 s down to 2.04 s).
+- **10.4 B:** `Parallel.ForEachAsync`. Starting all 30 sends and awaiting them one by one
+  would run all 30 at the same time, but R1 says at most 4. The library enforces the
+  limit with `MaxDegreeOfParallelism = 4`, so I did not write a counter or a semaphore
+  to limit it.
+
+**2. In 10.2, when several loads fail, how do you get every exception? What does a plain `await` give you?**
+A plain `await` on a faulted task rethrows only the first exception, even when
+several of the combined tasks failed. `Task.WhenAll` returns one combined task whose
+`Exception` property is an `AggregateException` holding the failure of every load. So I
+keep the combined task in a variable, `await` it inside a `try`, and in the `catch` I read
+`all.Exception.InnerExceptions` and throw them all together. For customer #99 this gave
+two failures: `Payments store timeout` and `Customer #99 not found`.
+
+**3. In 10.3, what happens to the losing carriers if you never cancel them?**
+They keep running in the background after the winner is chosen. They finish their
+handshake and their random wait for nothing, so they hold connections and use time,
+and in a real system they would cost money or API calls for an answer nobody uses. If
+one of them fails, its exception is stored in a task nobody awaits and is lost. I link
+every carrier to one `CancellationTokenSource`, together with the 1.2 s budget and the
+caller's token. When a quote is chosen, I cancel the source. In my run, when FastShip won
+order #2 at 908 ms, `[NileCourier] cancelled` was logged at once, instead of NileCourier
+running until its own random wait ended.
+
+**4. Why does 10.4 A get faster with more CPU cores, while 10.4 B does not depend on the number of cores?**
+10.4 A is CPU-bound: every score is calculation, so each core that runs a
+thread computes its own part of the 10,000 orders at the same time. More cores means
+more parts run at once, up to `Environment.ProcessorCount`. On my 8 cores it took 12.53 s
+sequentially and 2.04 s in parallel (x6.1, less than x8 because of the cost of starting
+and coordinating the threads). 10.4 B is I/O-bound: each send is mostly waiting (200 +
+300 + 500 ms of simulated SMTP work) and uses almost no CPU. Its time is decided by the
+limit of 4 at a time: 30 emails in groups of 4 is about 8 rounds of about 1 s, so
+the 8.2 s I measured would be the same on any number of cores.
+
+**5. What is the difference between parallel work (10.4 A) and concurrent asynchronous work (10.4 B)?**
+Parallel work means several pieces of work are executing at the same instant on
+different cores. It needs several threads that are all busy, and it is for CPU-bound
+work. Concurrent asynchronous work means many operations are in progress at the same
+time, but most of them are waiting, so very few threads are needed: a thread is
+released at each `await` and used again when the wait ends. In 10.4 B up to 4 sends
+were in progress at once (my counter showed a highest value of 4), and the log shows
+that a handful of threads handled all 30. They overlap their waiting, and nothing needs a
+core while they wait.
+
+**6. Show a cancelled run (`--cancel-after`) and explain what happened to the orders, the stock and the payments.**
+I ran the checkout workflow with `--cancel-after 4000` and `--cancel-after 7000`.
+
+```
+dotnet run --project OrderProcessing -- phase3 --cancel-after 4000
+Run cancelled — 2 orders finished, 18 cancelled
+
+dotnet run --project OrderProcessing -- phase3 --cancel-after 7000
+Run cancelled — 4 orders finished, 16 cancelled
+```
+
+- **Orders:** the finished orders kept their result (at 4000 ms, #4 and #15 were
+  already `Rejected`). Every other order was saved as `Pending` with
+  `FailureReason = "Cancelled"`. None became `Failed` or `PaymentFailed`. No new order
+  was started after the cancel, and `orders.json` still held 20 valid records in both runs.
+- **Payments:** at 7000 ms order #11 had already captured its payment, so the undo
+  refunded it. `payments.json` contains one record for order 11, `TXN-B0DC1BF0127F`, with
+  status `Refunded`, and no record is left as `Captured` for a cancelled order.
+- **Stock:** an order that had reserved stock releases every reserved item before it is
+  saved as `Pending`, so a cancelled run does not leave stock reserved.
+- **Total time was longer than the cancel time** (6.0 s for a 4 s cancel, 9.5 s for
+  7 s), because every order undoes its work and the stock releases queue on the same
+  `products.json` lock.
+- "Orders finished" counts every order that reached a final status before the cancel,
+  rejected ones included.
+
+### Cancellation design (spec 6.6)
+
+- Every async method takes a `CancellationToken` as its last parameter and passes it to
+  every `Task.Delay`, file call and repository call.
+- `Program` creates one `CancellationTokenSource` per phase run. Ctrl+C sets
+  `e.Cancel = true`, so the process is not killed, and cancels the source.
+  `--cancel-after <ms>` calls `CancelAfter`.
+- No order is started once the token is cancelled. An order in progress stops at its next
+  `await`, and its processor catches the cancellation and undoes what that order did:
+  it refunds a captured payment, releases reserved stock, and saves the order as
+  `Pending` with `Cancelled`.
+- The undo runs with its own token that has a 30-second limit, because the run's token
+  is already cancelled and would stop the undo at once. This is the one place where a
+  method uses a different token than the one it received, and I did it on purpose.
+- `ProductRepository.ReserveStockAsync` catches a cancellation that arrives during its
+  final commit wait. At that point the stock is already written to `products.json`, so
+  it returns its real result and lets the caller undo the reservation. Otherwise the
+  stock would stay reserved forever.
+- If the cancel arrives during the confirmation email, the order stays `Completed`,
+  because it is already paid and saved.
+- `JsonFileStore` writes a temporary file and then moves it over the real one, so a
+  cancelled or crashed write never leaves a half-written JSON file.
+- The demos (sync vs async, fire-and-forget) have their own run mode, `phase3-demos`,
+  so `phase3 --cancel-after` cancels the real workflow and not a demo.
+
+## Problems I found while building the project and how I solved them
+
+1. **Two orders reserved the last keyboard.** The unsafe version read the stock, waited,
+   and then wrote it, so both orders read `1` and both got it (stock stayed `0`, so
+   nothing looked wrong). The fix is `JsonFileStore.UpdateAsync`, which does the read,
+   the check and the write while holding the file's lock.
+2. **A `lock` cannot contain an `await`.** I used one `SemaphoreSlim` per file with
+   `WaitAsync(ct)`, released in a `finally`.
+3. **A crash during a write could leave a half-written file.** Writes go to a `.tmp`
+   file first and then replace the real file with `File.Move(..., overwrite: true)`.
+4. **Tasks that are never awaited hide their exceptions.** In Phase 2 order #7's shipping
+   failure was logged at once but only handled when the runner reached it, so its stock
+   stayed reserved for about 4 s. This is a real limit of awaiting in order, and it
+   is also why 10.1 uses `Task.WhenEach`.
+5. **A cancelled run could leak stock or payments.** An order cancelled after its payment
+   was captured needed a refund, and its undo had to run with its own token (see the
+   cancellation design above).
+6. **Async looked slower than sync in Phase 1** (53.5 s against 35.3 s). The async
+   stopwatch also covers the 20 saves of about 0.9 s each, and the sync run saves nothing,
+   as the task says. Validation alone takes about the same time in both runs.
+7. **Console colors could mix between threads.** `Log` prints each line inside a `lock`
+   that covers setting the color, writing, and resetting.
+8. **A shipping carrier that lost the race could look like a failure.** I separated three
+   outcomes of a carrier task: a quote (the winner), a failure (the next carrier is
+   awaited), and a cancellation (the carrier left the race because it lost or the
+   budget ran out).

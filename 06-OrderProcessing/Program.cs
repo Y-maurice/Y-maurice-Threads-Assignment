@@ -1,6 +1,7 @@
 ﻿using _06_OrderProcessing.Phase1;
 using _06_OrderProcessing.Phase2;
 using _06_OrderProcessing.Phase3;
+using _06_OrderProcessing.Phase4;
 using System.Text;
 
 public static class Program

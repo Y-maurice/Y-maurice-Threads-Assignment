@@ -15,7 +15,7 @@ public class CustomerDashboard
     public List<PaymentTransaction> Payments { get; set; } = new();
     public List<EmailMessage> Emails { get; set; } = new();
 }
-public sealed class CustomerDashboardService
+public class CustomerDashboardService
 {
     private readonly JsonFileStore _store;
     private readonly CustomerRepository _customers;
@@ -42,7 +42,7 @@ public sealed class CustomerDashboardService
         Task<List<PaymentTransaction>> payments = LoadPaymentsAsync(customerId, ct);
         Task<List<EmailMessage>> emails = LoadEmailsAsync(customerId, ct);
 
-        // One await for all of them. A plain await would rethrow only the FIRST failure,
+        // One await for all of them. A plain await would rethrow only the first failure,
         // so the combined task is kept and its Exception holds every failure.
         Task all = Task.WhenAll(profile, orders, payments, emails);
         try

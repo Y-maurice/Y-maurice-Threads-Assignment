@@ -9,6 +9,10 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Folder Include="sample-output\phase4\" />
+    <Folder Include="sample-output\phase3 Demos %28sync vs async%29- %28fire and forget%29\" />
+    <Folder Include="sample-output\phase3\" />
+    <Folder Include="sample-output\phase1\" />
     <Folder Include="sample-output\phase2\" />
   </ItemGroup>
 
