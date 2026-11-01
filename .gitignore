@@ -1,0 +1,52 @@
+
+# Build output
+[Bb]in/
+[Oo]bj/
+
+# Visual Studio
+.vs/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# Visual Studio Code
+.vscode/
+
+# JetBrains Rider / ReSharper
+.idea/
+_ReSharper*/
+*.sln.iml
+
+# Build and test results
+[Tt]est[Rr]esult*/
+[Bb]uild[Ll]og.*
+
+# NuGet
+*.nupkg
+*.snupkg
+.nuget/
+
+# Logs
+*.log
+
+# OS-generated files
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+
+# Environment variables and secrets
+.env
+.env.*
+!.env.example
+
+# Local configuration overrides
+appsettings.Local.json
+
+# Publish output
+publish/

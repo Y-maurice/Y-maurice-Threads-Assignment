@@ -1,0 +1,22 @@
+[
+  {
+    "code": "SAVE10",
+    "discountPercent": 10,
+    "expiryDate": "2027-04-27T00:00:00+02:00"
+  },
+  {
+    "code": "WELCOME15",
+    "discountPercent": 15,
+    "expiryDate": "2027-01-27T00:00:00+02:00"
+  },
+  {
+    "code": "FLASH20",
+    "discountPercent": 20,
+    "expiryDate": "2026-11-05T00:00:00+02:00"
+  },
+  {
+    "code": "OLD20",
+    "discountPercent": 20,
+    "expiryDate": "2026-09-29T00:00:00+03:00"
+  }
+]
